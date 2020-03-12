@@ -19,6 +19,42 @@ run_as() {
     fi
 }
 
+# usage: file_env VAR [DEFAULT]
+#    ie: file_env 'XYZ_DB_PASSWORD' 'example'
+# (will allow for "$XYZ_DB_PASSWORD_FILE" to fill in the value of
+#  "$XYZ_DB_PASSWORD" from a file, especially for Docker's secrets feature)
+file_env() {
+    local var="$1"
+    local fileVar="${var}_FILE"
+    local def="${2:-}"
+    if [ "${!var:-}" ] && [ "${!fileVar:-}" ]; then
+        mysql_error "Both $var and $fileVar are set (but are exclusive)"
+    fi
+    local val="$def"
+    if [ "${!var:-}" ]; then
+        val="${!var}"
+    elif [ "${!fileVar:-}" ]; then
+        val="$(< "${!fileVar}")"
+    fi
+    export "$var"="$val"
+    unset "$fileVar"
+}
+
+# Loads various settings that are used elsewhere in the script
+docker_setup_env() {
+    # Get config
+
+    # Initialize values that might be stored in a file
+    file_env 'MYSQL_DATABASE'
+    file_env 'MYSQL_USER'
+    file_env 'MYSQL_PASSWORD'
+    file_env 'POSTGRES_DB'
+    file_env 'POSTGRES_USER'
+    file_env 'POSTGRES_PASSWORD'
+    file_env 'NEXTCLOUD_ADMIN_USER'
+    file_env 'NEXTCLOUD_ADMIN_PASSWORD'
+}
+
 if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UPDATE:-0}" -eq 1 ]; then
     if [ -n "${REDIS_HOST+x}" ]; then
 
@@ -74,6 +110,9 @@ if expr "$1" : "apache" 1>/dev/null || [ "$1" = "php-fpm" ] || [ "${NEXTCLOUD_UP
         done
         rsync $rsync_options --include '/version.php' --exclude '/*' /usr/src/nextcloud/ /var/www/html/
         echo "Initializing finished"
+
+        # Load environment variables
+        docker_setup_env "$@"
 
         #install
         if [ "$installed_version" = "0.0.0.0" ]; then
